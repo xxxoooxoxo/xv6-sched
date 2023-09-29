@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "processesinfo.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -78,9 +79,98 @@ sys_read(void)
   return fileread(f, p, n);
 }
 
+static int writecount = 0;
+
+int 
+sys_writecount(void){
+  return writecount;
+}
+
+
+int
+sys_setwritecount(void)
+{
+  int n;
+
+  if(argint(0, &n) < 0)
+    return -1;
+
+  writecount = n;
+  return 0;
+}
+
+int
+sys_settickets(void)
+{
+  int n;
+
+  if(argint(0, &n) < 0)
+    return -1;
+
+  if(n < 1 || n > 100000)
+    return -1;
+
+
+  myproc()->tickets = n;
+
+  return 0;  // Return 0 on success
+}
+
+int
+sys_gettickets(void)
+{
+    return myproc()->tickets;
+}
+
+struct {
+    struct spinlock lock;
+    struct proc proc[NPROC];
+} ptable;
+  
+
+int
+sys_getprocessesinfo(void)
+{
+    struct proc *proc;
+    struct processes_info info;
+    int i = 0;
+
+    // Get the user-space pointer securely using argptr
+    struct processes_info *info_ptr;
+    if(argptr(0, (void*)&info_ptr, sizeof(struct processes_info)) < 0)
+        return -1;
+
+    acquire(&ptable.lock);
+
+    // Iterate over the process table and fill in the info
+    for(proc = ptable.proc; proc < &ptable.proc[NPROC]; proc++) {
+        if(proc->state != UNUSED) {
+            info.pids[i] = proc->pid;
+            info.times_scheduled[i] = proc->times_scheduled;
+            info.tickets[i] = proc->tickets;
+            i++;
+        }
+    }
+    info.num_processes = i;  // Set the total number of processes
+    
+    release(&ptable.lock);
+
+    // Copy the filled info structure to the user-space
+    if(copyout(myproc()->pgdir, (uint)info_ptr, &info, sizeof(info)) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+
+
 int
 sys_write(void)
 {
+
+  writecount++;
+  
   struct file *f;
   int n;
   char *p;

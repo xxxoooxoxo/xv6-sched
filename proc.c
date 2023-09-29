@@ -6,8 +6,9 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "lcg_parkmiller.c"
 
-struct {
+extern struct {
   struct spinlock lock;
   struct proc proc[NPROC];
 } ptable;
@@ -88,6 +89,8 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  p->tickets = 10; 
+
 
   release(&ptable.lock);
 
@@ -325,36 +328,57 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   c->proc = 0;
-  
+
   for(;;){
     // Enable interrupts on this processor.
     sti();
 
-    // Loop over process table looking for process to run.
+    // Acquire the process table lock.
     acquire(&ptable.lock);
+
+    // Calculate the total number of tickets for RUNNABLE processes.
+    int total_tickets = 0;
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->state == RUNNABLE) {
+        total_tickets += p->tickets;
+      }
+    }
+
+    // If no runnable processes, release the lock and continue.
+    if(total_tickets == 0){
+      release(&ptable.lock);
+      continue;
+    }
+
+    // Get a random number.
+    int random_ticket = next_random() % total_tickets; // Scale the random number
+    int ticket_sum = 0;
+
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+      ticket_sum += p->tickets;
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+      if(ticket_sum > random_ticket){
+        // We've found our process to run.
+        p->times_scheduled++;
+        // Switch to chosen process.
+        c->proc = p;
+        switchuvm(p);
+        p->state = RUNNING;
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
+        swtch(&(c->scheduler), p->context);
+        switchkvm();
+
+        // Process is done running for now.
+        c->proc = 0;
+        break; // Exit the inner for loop.
+      }
     }
     release(&ptable.lock);
-
   }
 }
-
 // Enter scheduler.  Must hold only ptable.lock
 // and have changed proc->state. Saves and restores
 // intena because intena is a property of this

@@ -1,4 +1,6 @@
 #include "param.h"
+#include "processesinfo.h"
+
 struct stat;
 struct rtcdate;
 
@@ -26,6 +28,12 @@ int sleep(int);
 int uptime(void);
 int yield(void);
 int shutdown(void);
+int writecount(void);
+int setwritecount(int);
+int settickets(int);
+int gettickets(void);
+int getprocessesinfo(struct processes_info *);
+
 
 // ulib.c
 int stat(const char*, struct stat*);
